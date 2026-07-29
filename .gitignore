@@ -1,0 +1,10 @@
+node_modules/
+.env
+config/serviceAccountKey.json
+*.log
+.DS_Store
+verify.js
+test_endpoints.js
+simulate_e2e.js
+
+
