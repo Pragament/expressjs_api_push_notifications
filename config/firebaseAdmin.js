@@ -5,7 +5,7 @@ const fs = require('fs');
 const projectId = process.env.FIREBASE_PROJECT_ID || 'eschool-dev-4c6b4';
 
 // Resolve service account credential path relative to backend root directory
-let credentialPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || 'config/serviceAccountKey.json';
+let credentialPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './serviceAccountKey.json';
 if (!path.isAbsolute(credentialPath)) {
   credentialPath = path.resolve(__dirname, '..', credentialPath);
 }
