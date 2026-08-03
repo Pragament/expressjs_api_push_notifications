@@ -4,6 +4,7 @@ const cors = require('cors');
 const questionsRouter = require('./routes/questions');
 const answersRouter = require('./routes/answers');
 const tokensRouter = require('./routes/tokens');
+const announcementsRouter = require('./routes/announcements');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -39,6 +40,7 @@ app.get('/', (req, res) => {
 app.use('/api/questions', questionsRouter);
 app.use('/api/answers', answersRouter);
 app.use('/api/tokens', tokensRouter);
+app.use('/api/teacher-announcement', announcementsRouter);
 
 // Global Error Handler Middleware
 app.use(errorHandler);

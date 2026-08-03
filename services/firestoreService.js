@@ -197,6 +197,30 @@ async function saveFcmToken(payload) {
   return docId;
 }
 
+/**
+ * Saves a new teacher announcement to the classAnnouncements collection.
+ */
+async function saveAnnouncement(payload) {
+  await checkInit();
+  console.log('[Firestore] Saving new announcement to Firestore...', {
+    classCode: payload.classCode,
+    teacherId: payload.teacherId,
+    title: payload.title
+  });
+
+  const announcementData = {
+    classCode: payload.classCode,
+    teacherId: payload.teacherId || '',
+    title: payload.title || '',
+    description: payload.description || '',
+    createdAt: new Date()
+  };
+
+  const docRef = await db.collection('classAnnouncements').add(announcementData);
+  console.log(`[Firestore] Announcement successfully saved with Document ID: ${docRef.id}`);
+  return { id: docRef.id, ...announcementData };
+}
+
 module.exports = {
   saveQuestion,
   getFcmTokensForClass,
@@ -204,5 +228,6 @@ module.exports = {
   getQuestionOwner,
   getTokenForStudent,
   removeFcmToken,
-  saveFcmToken
+  saveFcmToken,
+  saveAnnouncement
 };

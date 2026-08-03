@@ -87,20 +87,23 @@ async function sendAnswerNotification(token, payload) {
     return { success: true, message: 'No target device.' };
   }
 
-  console.log(`[NotificationService] Dispatching answer notification to token for Roll ${payload.askerRollNumber}...`);
+  console.log(`[NotificationService] Dispatching answer notification to token for Roll ${payload.rollNumber}...`);
 
   const message = {
     notification: {
-      title: '✅ Your Question Has Been Answered',
-      body: `Roll No. ${payload.solverRollNumber} has answered your question.`
+      title: 'New Solution Received',
+      body: `Roll No. ${payload.solverRollNumber} submitted a solution for your question.`
     },
     data: {
       type: 'answer_notification',
       questionId: String(payload.questionId),
-      classCode: String(payload.classCode),
-      rollNumber: String(payload.askerRollNumber),
+      answerId: String(payload.answerId || ''),
+      questionTitle: String(payload.questionTitle || 'Untitled'),
       solverRollNumber: String(payload.solverRollNumber),
-      solverName: String(payload.solverName || '')
+      solverName: String(payload.solverName || ''),
+      classCode: String(payload.classCode),
+      rollNumber: String(payload.rollNumber),
+      timestamp: String(payload.timestamp || new Date().toISOString())
     },
     token: token
   };
@@ -128,7 +131,73 @@ async function sendAnswerNotification(token, payload) {
   }
 }
 
+/**
+ * Sends a multicast notification to a list of student tokens when a teacher makes an announcement.
+ */
+async function sendTeacherAnnouncementNotification(tokens, payload) {
+  await checkInit();
+  if (!tokens || tokens.length === 0) {
+    console.log('[NotificationService] No tokens provided. Skipping announcement dispatch.');
+    return { success: true, message: 'No target devices.' };
+  }
+
+  console.log(`[NotificationService] Dispatching teacher announcement to ${tokens.length} tokens...`);
+
+  const message = {
+    notification: {
+      title: '📢 Announcement',
+      body: payload.title ? `${payload.title}\n${payload.description}` : payload.description
+    },
+    data: {
+      type: 'teacher_announcement',
+      announcementId: String(payload.announcementId),
+      classCode: String(payload.classCode),
+      title: String(payload.title || ''),
+      description: String(payload.description || ''),
+      createdAt: String(payload.createdAt || new Date().toISOString())
+    },
+    tokens: tokens
+  };
+
+  try {
+    const response = await messaging.sendEachForMulticast(message);
+    console.log('[NotificationService] Multicast send response:', response);
+    
+    // Process delivery failures and clean up invalid tokens
+    if (response.failureCount > 0) {
+      const failedTokens = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          const error = resp.error;
+          console.warn(`[NotificationService] Failed to deliver announcement to token at index ${idx}. Error:`, error.code, error.message);
+          if (error.code === 'messaging/invalid-registration-token' ||
+              error.code === 'messaging/registration-token-not-registered' ||
+              error.code === 'messaging/invalid-argument' ||
+              (error.message && (error.message.includes('registration token') || error.message.includes('not registered')))) {
+            failedTokens.push(tokens[idx]);
+          }
+        }
+      });
+
+      if (failedTokens.length > 0) {
+        console.log(`[NotificationService] Cleaning up ${failedTokens.length} stale/invalid tokens.`);
+        for (const token of failedTokens) {
+          await removeFcmToken(token).catch(err => {
+            console.error('[NotificationService] Error removing stale token:', err);
+          });
+        }
+      }
+    }
+
+    return { success: true, response };
+  } catch (error) {
+    console.error('[NotificationService] Error sending announcement multicast message:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   sendNewQuestionNotification,
-  sendAnswerNotification
+  sendAnswerNotification,
+  sendTeacherAnnouncementNotification
 };
