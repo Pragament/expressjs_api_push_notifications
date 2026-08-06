@@ -1,8 +1,37 @@
 const { db, isInitialized } = require('../config/firebaseAdmin');
 
+// In-memory cache for FCM tokens grouped by classCode
+// Structure: { [classCode]: { [rollNumber]: fcmToken } }
+const tokenCache = {};
+
 async function checkInit() {
   if (!isInitialized()) {
     throw new Error('Firebase Admin SDK is not initialized. Check your credentials file.');
+  }
+}
+
+/**
+ * Initializes the in-memory token cache by reading all registrations from Firestore once.
+ */
+async function initializeTokenCache() {
+  await checkInit();
+  console.log('[Cache] Initializing FCM token cache from Firestore...');
+  try {
+    const snapshot = await db.collection('studentFcmTokens').get();
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.classCode && data.rollNumber && data.fcmToken) {
+        const classCode = String(data.classCode).trim();
+        const rollNumber = String(data.rollNumber).trim();
+        if (!tokenCache[classCode]) {
+          tokenCache[classCode] = {};
+        }
+        tokenCache[classCode][rollNumber] = data.fcmToken;
+      }
+    });
+    console.log('[Cache] FCM token cache initialized. Classes cached:', Object.keys(tokenCache).length);
+  } catch (err) {
+    console.error('[Cache Error] Failed to initialize FCM token cache:', err);
   }
 }
 
@@ -37,33 +66,27 @@ async function saveQuestion(payload) {
 }
 
 /**
- * Retrieves all FCM tokens for a class, excluding a specific roll number.
+ * Retrieves all FCM tokens for a class from the memory cache, excluding a specific roll number.
  */
 async function getFcmTokensForClass(classCode, excludeRollNumber) {
-  await checkInit();
-  console.log(`[Firestore] Fetching student FCM tokens for Class Code: ${classCode}`);
-  console.log(`[Firestore] Express token lookup. Class Code: ${classCode}`);
-  
-  const snapshot = await db.collection('studentFcmTokens')
-    .where('classCode', '==', classCode)
-    .get();
+  console.log(`[Cache] Fetching student FCM tokens from memory cache for Class Code: ${classCode}`);
+  const cleanClass = String(classCode).trim();
+  const cleanExclude = String(excludeRollNumber || '').trim();
 
+  const classGroup = tokenCache[cleanClass] || {};
   const tokens = [];
   const rollNumbers = [];
 
-  snapshot.forEach(doc => {
-    const data = doc.data();
-    if (data.fcmToken) {
-      if (String(data.rollNumber) !== String(excludeRollNumber)) {
-        tokens.push(data.fcmToken);
-        rollNumbers.push(data.rollNumber);
-      } else {
-        console.log(`[Firestore] Excluded asker's own FCM token (Roll: ${excludeRollNumber})`);
-      }
+  for (const [roll, token] of Object.entries(classGroup)) {
+    if (roll !== cleanExclude) {
+      tokens.push(token);
+      rollNumbers.push(roll);
+    } else {
+      console.log(`[Cache] Excluded asker's own FCM token (Roll: ${excludeRollNumber})`);
     }
-  });
+  }
 
-  console.log(`[Firestore] Found ${tokens.length} target student token(s). Roll Numbers:`, rollNumbers);
+  console.log(`[Cache] Found ${tokens.length} target student token(s) from memory. Roll Numbers:`, rollNumbers);
   return { tokens, rollNumbers };
 }
 
@@ -135,25 +158,17 @@ async function getQuestionOwner(questionId) {
 }
 
 /**
- * Retrieves a single student's FCM token.
+ * Retrieves a single student's FCM token from the memory cache.
  */
 async function getTokenForStudent(classCode, rollNumber) {
-  await checkInit();
-  const docId = `${classCode}_${rollNumber}`;
-  console.log(`[Firestore] Retrieving FCM registration token for Doc ID: ${docId}`);
-  console.log(`[Firestore] Express token lookup. Doc ID: ${docId}`);
-
-  const doc = await db.collection('studentFcmTokens').doc(docId).get();
-  if (!doc.exists) {
-    console.warn(`[Firestore] No token registration found for student: ${docId}`);
-    return null;
-  }
-
-  return doc.data().fcmToken || null;
+  console.log(`[Cache] Retrieving FCM token from memory for Class: ${classCode}, Roll: ${rollNumber}`);
+  const cleanClass = String(classCode).trim();
+  const cleanRoll = String(rollNumber).trim();
+  return tokenCache[cleanClass]?.[cleanRoll] || null;
 }
 
 /**
- * Removes an invalid FCM token from Firestore.
+ * Removes an invalid FCM token from Firestore and memory cache.
  */
 async function removeFcmToken(token) {
   await checkInit();
@@ -171,10 +186,25 @@ async function removeFcmToken(token) {
 
   await batch.commit();
   console.log('[Firestore] Invalid tokens successfully cleaned up.');
+
+  // Update memory cache
+  const cleanToken = String(token).trim();
+  for (const classCode of Object.keys(tokenCache)) {
+    const classGroup = tokenCache[classCode];
+    for (const rollNumber of Object.keys(classGroup)) {
+      if (classGroup[rollNumber] === cleanToken) {
+        console.log(`[Cache] Removing deleted token from memory for Class: ${classCode}, Roll: ${rollNumber}`);
+        delete classGroup[rollNumber];
+      }
+    }
+    if (Object.keys(classGroup).length === 0) {
+      delete tokenCache[classCode];
+    }
+  }
 }
 
 /**
- * Saves or updates a student's FCM token in Firestore.
+ * Saves or updates a student's FCM token in Firestore and updates the memory cache.
  */
 async function saveFcmToken(payload) {
   await checkInit();
@@ -194,6 +224,15 @@ async function saveFcmToken(payload) {
   
   console.log(`[Firestore] FCM token successfully saved under Doc ID: ${docId}`);
   console.log(`[Firestore] Firestore document created. Doc ID: ${docId}`);
+
+  // Update memory cache
+  const cleanClass = String(classCode).trim();
+  const cleanRoll = String(rollNumber).trim();
+  if (!tokenCache[cleanClass]) {
+    tokenCache[cleanClass] = {};
+  }
+  tokenCache[cleanClass][cleanRoll] = String(fcmToken).trim();
+
   return docId;
 }
 
@@ -204,5 +243,6 @@ module.exports = {
   getQuestionOwner,
   getTokenForStudent,
   removeFcmToken,
-  saveFcmToken
+  saveFcmToken,
+  initializeTokenCache
 };
